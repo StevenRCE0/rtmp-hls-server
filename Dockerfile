@@ -1,99 +1,104 @@
-ARG DEBIAN_VERSION=stretch-slim 
+ARG DEBIAN_VERSION=bullseye-slim
 
 ##### Building stage #####
 FROM debian:${DEBIAN_VERSION} as builder
 MAINTAINER Tareq Alqutami <tareqaziz2010@gmail.com>
 
-# Versions of nginx, rtmp-module and ffmpeg 
-ARG  NGINX_VERSION=1.17.5
-ARG  NGINX_RTMP_MODULE_VERSION=1.2.1
-ARG  FFMPEG_VERSION=4.2.1
+# Versions of nginx, rtmp-module and ffmpeg
+ARG  NGINX_VERSION=1.23.1
+ARG  FFMPEG_VERSION=7.1
+ARG  DASH_MPD_CLI_VERSION=0.2.24
+ARG  DASH_MPD_CLI_ARCH=linux-amd64
 
 # Install dependencies
 RUN apt-get update && \
-	apt-get install -y \
-		wget build-essential ca-certificates \
-		openssl libssl-dev yasm \
-		libpcre3-dev librtmp-dev libtheora-dev \
-		libvorbis-dev libvpx-dev libfreetype6-dev \
-		libmp3lame-dev libx264-dev libx265-dev && \
+    apt-get install -y \
+    wget build-essential ca-certificates \
+    openssl libssl-dev yasm git pkg-config \
+    libpcre3-dev librtmp-dev libtheora-dev \
+    libvorbis-dev libvpx-dev libfreetype6-dev \
+    libmp3lame-dev libx264-dev libx265-dev && \
     rm -rf /var/lib/apt/lists/*
-	
-		
+
+
 # Download nginx source
 RUN mkdir -p /tmp/build && \
-	cd /tmp/build && \
-	wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz && \
-	tar -zxf nginx-${NGINX_VERSION}.tar.gz && \
-	rm nginx-${NGINX_VERSION}.tar.gz
+    cd /tmp/build && \
+    wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz && \
+    tar -zxf nginx-${NGINX_VERSION}.tar.gz && \
+    rm nginx-${NGINX_VERSION}.tar.gz
 
 # Download rtmp-module source
-RUN cd /tmp/build && \
-    wget https://github.com/arut/nginx-rtmp-module/archive/v${NGINX_RTMP_MODULE_VERSION}.tar.gz && \
-    tar -zxf v${NGINX_RTMP_MODULE_VERSION}.tar.gz && \
-	rm v${NGINX_RTMP_MODULE_VERSION}.tar.gz
+RUN  cd /tmp/build && \
+    git clone https://github.com/arut/nginx-rtmp-module.git
 
 # Build nginx with nginx-rtmp module
 RUN cd /tmp/build/nginx-${NGINX_VERSION} && \
     ./configure \
-        --sbin-path=/usr/local/sbin/nginx \
-        --conf-path=/etc/nginx/nginx.conf \
-        --error-log-path=/var/log/nginx/error.log \
-        --http-log-path=/var/log/nginx/access.log \		
-        --pid-path=/var/run/nginx/nginx.pid \
-        --lock-path=/var/lock/nginx.lock \
-        --http-client-body-temp-path=/tmp/nginx-client-body \
-        --with-http_ssl_module \
-        --with-threads \
-        --add-module=/tmp/build/nginx-rtmp-module-${NGINX_RTMP_MODULE_VERSION} && \
+    --sbin-path=/usr/local/sbin/nginx \
+    --conf-path=/etc/nginx/nginx.conf \
+    --error-log-path=/var/log/nginx/error.log \
+    --http-log-path=/var/log/nginx/access.log \
+    --pid-path=/var/run/nginx/nginx.pid \
+    --lock-path=/var/lock/nginx.lock \
+    --http-client-body-temp-path=/tmp/nginx-client-body \
+    --with-http_ssl_module \
+    --with-threads \
+    --add-module=/tmp/build/nginx-rtmp-module && \
     make -j $(getconf _NPROCESSORS_ONLN) && \
     make install
 
 # Download ffmpeg source
 RUN cd /tmp/build && \
-  wget http://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.gz && \
-  tar -zxf ffmpeg-${FFMPEG_VERSION}.tar.gz && \
-  rm ffmpeg-${FFMPEG_VERSION}.tar.gz
-  
+    wget http://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.gz && \
+    tar -zxf ffmpeg-${FFMPEG_VERSION}.tar.gz && \
+    rm ffmpeg-${FFMPEG_VERSION}.tar.gz
+
+# Get dash-mpd-cli
+RUN cd /tmp && \
+    wget https://github.com/emarsden/dash-mpd-cli/releases/download/v${DASH_MPD_CLI_VERSION}/dash-mpd-cli-${DASH_MPD_CLI_ARCH} -O dash-mpd-cli && \
+    mv dash-mpd-cli /usr/local/bin && \
+    chmod +x /usr/local/bin/dash-mpd-cli
+
 # Build ffmpeg
 RUN cd /tmp/build/ffmpeg-${FFMPEG_VERSION} && \
-  ./configure \
-	  --enable-version3 \
-	  --enable-gpl \
-	  --enable-small \
-	  --enable-libx264 \
-	  --enable-libx265 \
-	  --enable-libvpx \
-	  --enable-libtheora \
-	  --enable-libvorbis \
-	  --enable-librtmp \
-	  --enable-postproc \
-	  --enable-swresample \ 
-	  --enable-libfreetype \
-	  --enable-libmp3lame \
-	  --disable-debug \
-	  --disable-doc \
-	  --disable-ffplay \
-	  --extra-libs="-lpthread -lm" && \
-	make -j $(getconf _NPROCESSORS_ONLN) && \
-	make install
-	
+    ./configure \
+    --enable-version3 \
+    --enable-gpl \
+    --enable-small \
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libvpx \
+    --enable-libtheora \
+    --enable-libvorbis \
+    --enable-librtmp \
+    --enable-postproc \
+    --enable-swresample \
+    --enable-libfreetype \
+    --enable-libmp3lame \
+    --disable-debug \
+    --disable-doc \
+    --disable-ffplay \
+    --extra-libs="-lpthread -lm" && \
+    make -j $(getconf _NPROCESSORS_ONLN) && \
+    make install
+
 # Copy stats.xsl file to nginx html directory and cleaning build files
-RUN cp /tmp/build/nginx-rtmp-module-${NGINX_RTMP_MODULE_VERSION}/stat.xsl /usr/local/nginx/html/stat.xsl && \
-	rm -rf /tmp/build
+RUN cp /tmp/build/nginx-rtmp-module/stat.xsl /usr/local/nginx/html/stat.xsl && \
+    rm -rf /tmp/build
 
 ##### Building the final image #####
 FROM debian:${DEBIAN_VERSION}
 
 # Install dependencies
 RUN apt-get update && \
-	apt-get install -y \
-		ca-certificates openssl libpcre3-dev \
-		librtmp1 libtheora0 libvorbis-dev libmp3lame0 \
-		libvpx4 libx264-dev libx265-dev && \
+    apt-get install -y \
+    ca-certificates openssl libpcre3-dev \
+    librtmp1 libtheora0 libvorbis-dev libmp3lame0 \
+    libvpx-dev libx264-dev libx265-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy files from build stage to final stage	
+# Copy files from build stage to final stage
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /etc/nginx /etc/nginx
 COPY --from=builder /var/log/nginx /var/log/nginx
